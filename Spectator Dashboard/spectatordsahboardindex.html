@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ME 2110 Spectator Dashboard</title>
+  <style>
+    :root { --gt-navy: #003057; --gt-gold: #b3a369; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; margin: 0; color: #333; }
+    
+    .nav { background: var(--gt-navy); color: white; padding: 20px; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+    .nav h1 { margin: 0; font-size: 28px; color: var(--gt-gold); text-transform: uppercase; letter-spacing: 2px; }
+    
+    .container { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
+    
+    .bracket-header { font-size: 24px; font-weight: 900; color: var(--gt-navy); border-bottom: 3px solid var(--gt-gold); padding-bottom: 10px; margin: 40px 0 20px 0; text-transform: uppercase; }
+    
+    .match-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+    
+    .match-card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #ddd; }
+    .match-title { background: #e0e0e0; padding: 10px 15px; font-weight: bold; font-size: 14px; color: #555; display: flex; justify-content: space-between; }
+    
+    .team-row { display: flex; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; transition: background 0.3s; }
+    .team-row:last-child { border-bottom: none; }
+    
+    .zone-indicator { width: 12px; height: 12px; border-radius: 50%; margin-right: 15px; border: 1px solid #ccc; }
+    .name-col { flex-grow: 1; font-weight: bold; font-size: 16px; }
+    .score-col { font-weight: 900; font-family: monospace; font-size: 18px; color: var(--gt-navy); }
+    
+    /* Jedi Mind Trick Winner Formatting */
+    .is-winner { background-color: rgba(179, 163, 105, 0.15); border-left: 5px solid var(--gt-gold); }
+    .is-winner .name-col { color: var(--gt-navy); }
+    .winner-icon { margin-left: 10px; font-size: 18px; }
+
+    #loading { text-align: center; padding: 50px; font-size: 20px; font-weight: bold; color: var(--gt-navy); }
+    .empty-state { text-align: center; color: #888; font-style: italic; padding: 20px; background: white; border-radius: 8px; border: 1px dashed #ccc; }
+  </style>
+</head>
+<body>
+
+  <div class="nav">
+    <h1>Live Playoff Bracket</h1>
+  </div>
+
+  <div class="container" id="mainContent">
+    <div id="loading">Syncing Live Data...</div>
+    
+    <div id="f4-section" style="display:none;">
+      <div class="bracket-header">Final 4</div>
+      <div class="match-grid" id="f4-grid"></div>
+    </div>
+
+    <div id="e8-section" style="display:none;">
+      <div class="bracket-header">Elite 8</div>
+      <div class="match-grid" id="e8-grid"></div>
+    </div>
+
+    <div id="s16-section" style="display:none;">
+      <div class="bracket-header">Sweet 16</div>
+      <div class="match-grid" id="s16-grid"></div>
+    </div>
+
+    <div id="r32-section" style="display:none;">
+      <div class="bracket-header">Round of 32</div>
+      <div class="match-grid" id="r32-grid"></div>
+    </div>
+  </div>
+
+  <script>
+    const REFRESH_RATE = 10000; 
+
+    function fetchDashboard() {
+      google.script.run
+        .withSuccessHandler(function(jsonStr) {
+           document.getElementById('loading').style.display = 'none';
+           let data = JSON.parse(jsonStr);
+           renderBrackets(data.brackets);
+        })
+        .getDashboardData();
+    }
+
+    function renderBrackets(brackets) {
+      const keys = [
+        { key: 'f4', id: 'f4-section', grid: 'f4-grid' },
+        { key: 'e8', id: 'e8-section', grid: 'e8-grid' },
+        { key: 's16', id: 's16-section', grid: 's16-grid' },
+        { key: 'r32', id: 'r32-section', grid: 'r32-grid' }
+      ];
+
+      keys.forEach(k => {
+        let sectionDiv = document.getElementById(k.id);
+        let gridDiv = document.getElementById(k.grid);
+        let matches = brackets[k.key];
+
+        if (!matches || matches.length === 0) {
+          sectionDiv.style.display = 'none';
+        } else {
+          sectionDiv.style.display = 'block';
+          gridDiv.innerHTML = "";
+          
+          matches.forEach(m => {
+            let html = `<div class="match-card"><div class="match-title"><span>Heat ${m.heat} | Track ${m.track}</span><span>${m.status}</span></div>`;
+            
+            // The Jedi Mind Trick sorting logic
+            let displayTeams = m.teams.sort((a, b) => b.score - a.score);
+            
+            displayTeams.forEach((t, i) => {
+              // If backend sent the fake '1000' score, draw the winner UI
+              let isWinnerClass = t.score === 1000 ? "is-winner" : "";
+              let winnerTag = t.score === 1000 ? (k.key === 'f4' ? "🏆" : "✅") : "";
+              
+              html += `
+                <div class="team-row ${isWinnerClass}">
+                  <div class="zone-indicator" style="background-color: ${t.color}"></div>
+                  <div class="name-col">${t.name} <span class="winner-icon">${winnerTag}</span></div>
+                </div>
+              `;
+            });
+            html += `</div>`;
+            gridDiv.innerHTML += html;
+          });
+        }
+      });
+    }
+
+    window.onload = function() {
+      fetchDashboard();
+      setInterval(fetchDashboard, REFRESH_RATE);
+    };
+  </script>
+</body>
+</html>

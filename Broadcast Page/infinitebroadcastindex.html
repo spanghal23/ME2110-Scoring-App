@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root { --gt-gold: #b3a369; --gt-navy: #003057; --bg-color: #f4f4f4; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); margin: 0; color: #333; overflow: hidden; }
+    
+    .top-nav { background-color: var(--gt-navy); display: flex; justify-content: space-between; align-items: center; padding: 15px 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); position: sticky; top: 0; z-index: 100; }
+    .nav-title { color: var(--gt-gold); font-size: 28px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin: 0; }
+    .refresh-status { color: #aaa; font-size: 14px; font-style: italic; }
+
+    .view-container { padding: 20px 40px; max-width: 1400px; margin: 0 auto; }
+    .lb-container { background: white; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.15); overflow: hidden; }
+    
+    .table-viewport { height: calc(100vh - 140px); overflow-y: hidden; position: relative; }
+    table { width: 100%; border-collapse: collapse; font-size: 18px; }
+    
+    thead { position: sticky; top: 0; z-index: 10; }
+    th { background-color: var(--gt-navy); color: white; font-weight: bold; padding: 15px 10px; text-align: left; border-bottom: 4px solid var(--gt-gold); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2); }
+    td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #eee; }
+    
+    .rank-col { width: 40px; font-weight: 900; color: var(--gt-gold); text-align: center; font-size: 20px; }
+    .id-col { font-size: 14px; color: #666; font-weight: bold; width: 100px; }
+    .name-col { font-weight: bold; font-size: 18px; }
+    .score-col { font-weight: 900; text-align: right; font-family: monospace; font-size: 22px; color: var(--gt-navy); padding-right: 20px;}
+    
+    .cut-line-row td { text-align: center !important; color: #c62828 !important; font-weight: 900; background-color: #ffebee !important; border-top: 3px dashed #c62828 !important; border-bottom: 3px dashed #c62828 !important; letter-spacing: 4px; padding: 15px !important; text-transform: uppercase; }
+    .loop-divider td { background: linear-gradient(90deg, var(--gt-navy), var(--gt-gold), var(--gt-navy)) !important; color: white !important; font-weight: 900; text-align: center !important; letter-spacing: 6px; padding: 20px !important; text-transform: uppercase; border: none !important; }
+
+    #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--gt-navy); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 1000; }
+    .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--gt-gold); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .error-msg { background: #c62828; padding: 10px 20px; border-radius: 6px; margin-top: 15px; display: none; }
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div><div style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">SYNCING BROADCAST...</div><div id="errorDisplay" class="error-msg"></div></div>
+  <div class="top-nav"><h1 class="nav-title">ME 2110 Global Leaderboard</h1><span class="refresh-status" id="lastSyncTxt">Syncing...</span></div>
+
+  <div class="view-container">
+    <div class="lb-container">
+      <div class="table-viewport" id="scrollViewport">
+        <table>
+          <thead><tr><th class="rank-col">#</th><th class="id-col">ID</th><th class="name-col">Team Name</th><th class="score-col">High Score</th></tr></thead>
+          <tbody id="tableBodyOriginal"></tbody>
+          <tbody id="tableDivider"><tr class="loop-divider"><td colspan="4">⟳ END OF LEADERBOARD ⟳</td></tr></tbody>
+          <tbody id="tableBodyClone"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SCROLL_SPEED = 0.6; 
+    const REFRESH_RATE = 10000; 
+
+    let animationFrameId;
+    let isScrolling = false;
+
+    window.onload = function() { fetchData(); setInterval(fetchData, REFRESH_RATE); };
+
+    function fetchData() {
+      google.script.run
+        .withSuccessHandler(function(jsonString) {
+           try {
+             var data = JSON.parse(jsonString);
+             if (data.error) throw new Error(data.error);
+             
+             var d = new Date();
+             document.getElementById('lastSyncTxt').innerText = "Last Sync: " + d.toLocaleTimeString();
+             
+             document.getElementById('loading').style.display = 'none';
+             renderLeaderboard(data.leaderboard);
+             
+             if (!isScrolling) { isScrolling = true; scrollLoop(); }
+           } catch(e) {
+             document.getElementById('errorDisplay').innerText = "Data Error: " + e.message;
+             document.getElementById('errorDisplay').style.display = 'block';
+           }
+        })
+        .withFailureHandler(function(err){ 
+            document.getElementById('errorDisplay').innerText = "Connection Failed: " + err.message;
+            document.getElementById('errorDisplay').style.display = 'block';
+        })
+        .getBroadcastLeaderboard();
+    }
+
+    function renderLeaderboard(leaderboardData) {
+      if (!leaderboardData || leaderboardData.length === 0) return;
+      var htmlContent = "";
+      
+      leaderboardData.forEach(function(team, index) {
+        var displayScore = team.data.max === -1 ? "<span style='color:#bbb; font-size:14px; font-weight:normal;'>No Score</span>" : team.data.max;
+        htmlContent += `<tr><td class="rank-col">${team.rank}</td><td class="id-col">${team.id}</td><td class="name-col">${team.name || "Unknown Team"}</td><td class="score-col">${displayScore}</td></tr>`;
+        if (index === 31) htmlContent += `<tr class="cut-line-row"><td colspan="4">--- Playoff Cut Line ---</td></tr>`;
+      });
+
+      document.getElementById('tableBodyOriginal').innerHTML = htmlContent;
+      document.getElementById('tableBodyClone').innerHTML = htmlContent;
+    }
+
+    function scrollLoop() {
+      var viewport = document.getElementById('scrollViewport');
+      var block1 = document.getElementById('tableBodyOriginal');
+      var divider = document.getElementById('tableDivider');
+
+      if (viewport && block1 && divider) {
+          viewport.scrollTop += SCROLL_SPEED;
+          var snapPoint = block1.offsetHeight + divider.offsetHeight;
+          if (viewport.scrollTop >= snapPoint) viewport.scrollTop = 0;
+      }
+      animationFrameId = requestAnimationFrame(scrollLoop);
+    }
+  </script>
+</body>
+</html>
